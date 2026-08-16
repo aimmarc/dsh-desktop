@@ -55,12 +55,14 @@ async function fetchNodeBinary(archName, baseUrl) {
   const tmp = path.join(os.tmpdir(), `dsh-node-${archName}-${Date.now()}`);
   mkdirSync(tmp, { recursive: true });
   if (platform === "win32") {
-    // bsdtar (Windows' built-in tar) misparses backslash paths passed with
-    // quotes (`Cannot connect to C:`). Convert to forward slashes, which
-    // both bsdtar and cmd accept.
-    const a = archive.replaceAll("\\", "/");
-    const t = tmp.replaceAll("\\", "/");
-    execSync(`tar -xf "${a}" -C "${t}"`, { stdio: "inherit" });
+    // Windows' built-in bsdtar misparses the extraction target (`Cannot
+    // connect to C:`), so use PowerShell's Expand-Archive instead — it is
+    // always present on Windows and handles paths natively.
+    const ps = [
+      `$ErrorActionPreference='Stop'`,
+      `Expand-Archive -LiteralPath '${archive.replaceAll("'", "''")}' -DestinationPath '${tmp.replaceAll("'", "''")}' -Force`,
+    ].join("; ");
+    execSync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${ps.replaceAll('"', '\\"')}"`, { stdio: "inherit" });
   } else {
     execSync(`tar -xzf "${archive}" -C "${tmp}"`, { stdio: "inherit" });
   }
