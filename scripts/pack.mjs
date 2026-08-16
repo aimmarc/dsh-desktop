@@ -245,6 +245,50 @@ for (const entry of entries) {
 }
 console.log(`[pack] copied ${copied} packages, skipped ${skipped}`);
 
+// 1b. Universal (macOS) fix-up: npm only installs platform packages matching
+//     the build machine (CI runs arm64), so the x64 sharp platform packages
+//     never land in node_modules. Download and inject the missing platform
+//     packages straight from the npm registry (bypassing npm's os/cpu gate).
+if (UNIVERSAL && process.platform === "darwin") {
+  const { execSync } = await import("node:child_process");
+  const registry = process.env.npm_config_registry ?? "https://registry.npmjs.org";
+  const sharpPkg = JSON.parse(readFileSync(path.join(srcModules, "sharp", "package.json"), "utf8"));
+  const optional = sharpPkg.optionalDependencies ?? {};
+  const wanted = ["@img/sharp-darwin-x64", "@img/sharp-libvips-darwin-x64"];
+  for (const name of wanted) {
+    if (existsSync(path.join(destModules, name))) continue; // already present
+    const version = optional[name];
+    if (!version) {
+      console.log(`[pack] universal: ${name} not declared by sharp, skipping`);
+      continue;
+    }
+    // Resolve the exact version (allow range like ^0.35.3 → latest matching).
+    const manifestUrl = `${registry}/${name.replace("/", "%2F")}`;
+    const res = await fetch(manifestUrl, { headers: { accept: "application/vnd.npm.install-v1+json" } });
+    if (!res.ok) throw new Error(`[pack] universal: cannot fetch manifest for ${name}: HTTP ${res.status}`);
+    const manifest = await res.json();
+    const matched = manifest.versions?.[version] ?? Object.keys(manifest.versions ?? {}).filter((v) => v.startsWith(version.replace(/^[\^~]/, ""))).sort().pop();
+    if (!matched) throw new Error(`[pack] universal: no version for ${name}@${version}`);
+    const tarball = manifest.versions[matched].dist.tarball;
+    console.log(`[pack] universal: fetching ${name}@${matched}`);
+    const tarRes = await fetch(tarball);
+    if (!tarRes.ok) throw new Error(`[pack] universal: download failed ${tarball}: HTTP ${tarRes.status}`);
+    const buf = Buffer.from(await tarRes.arrayBuffer());
+    const tmpTar = path.join(os.tmpdir(), `${name.replace("/", "-")}.tgz`);
+    writeFileSync(tmpTar, buf);
+    const tmpDir = path.join(os.tmpdir(), `univ-${Date.now()}`);
+    mkdirSync(tmpDir, { recursive: true });
+    execSync(`tar -xzf "${tmpTar}" -C "${tmpDir}"`, { stdio: "inherit" });
+    const pkgSrc = path.join(tmpDir, "package");
+    const pkgDest = path.join(destModules, name);
+    mkdirSync(path.dirname(pkgDest), { recursive: true });
+    cpSync(pkgSrc, pkgDest, { recursive: true, force: true });
+    rmSync(tmpDir, { recursive: true, force: true });
+    rmSync(tmpTar, { force: true });
+    console.log(`[pack] universal: injected ${name}`);
+  }
+}
+
 // 2. always-drop cleanup pass over the copied tree.
 let droppedBytes = 0;
 for (const f of walk(destModules)) {
