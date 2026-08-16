@@ -53,7 +53,15 @@ jobs:
         run: node scripts/pack.mjs --minify
 
       - name: Build Tauri app
-        run: npm run tauri build
+        run: |
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            # Linux: deb is reliable on CI; AppImage needs linuxdeploy which
+            # frequently fails on hosted runners (network/toolchain issues).
+            npx tauri build --bundles deb
+          else
+            npx tauri build
+          fi
+        shell: bash
 
       - name: Upload installers
         uses: actions/upload-artifact@v4
