@@ -21,6 +21,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 log = "0.4"
 tokio = { version = "1", features = ["time"] }
+window-vibrancy = "0.6"
 # Cross-platform process spawning with full env control.
 # `duplicate_stdout`/`duplicate_stderr` keep child logs on the parent's stderr
 # during `tauri dev`.
