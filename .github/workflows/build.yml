@@ -85,12 +85,15 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
+          # Only top-level installer files. macOS universal lands under
+          # target/universal-apple-darwin; Windows/Linux under target/release.
+          # `bundle/*/*.dmg|exe` matches one level below bundle (nsis/dmg/deb)
+          # and never descends into the deb package or .app bundle contents.
           path: |
-            # Universal (macOS) builds land under target/universal-apple-darwin;
-            # regular builds under target/release.
-            src-tauri/target/universal-apple-darwin/release/bundle/**/*
-            src-tauri/target/release/bundle/**/*
-          if-no-files-found: error
+            src-tauri/target/universal-apple-darwin/release/bundle/*/*.dmg
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/deb/*.deb
+          if-no-files-found: warn
 
   # Upload to the GitHub Release only after ALL platform builds finish, so
   # every installer lands on the release (a per-matrix upload races and only
@@ -112,8 +115,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Collect installer files regardless of how download-artifact laid
-          # out the bundle dirs (nsis/dmg/deb, universal paths, versioned names).
+          # Only top-level installer files survive upload; collect them here.
           mapfile -t FILES < <(find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) | sort)
           echo "installers:"; printf '  %s\n' "${FILES[@]}"
           gh release create "${GITHUB_REF_NAME}" \
