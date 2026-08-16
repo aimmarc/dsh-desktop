@@ -68,7 +68,10 @@ fn sync_titlebar_theme(app: tauri::AppHandle) {
             "#;
             let handle = app.clone();
             let _ = win.eval_with_callback(js, move |result| {
-                let dark = result.trim() == "dark";
+                // eval_with_callback delivers the JSON-encoded value, so a
+                // string result arrives as `"dark"` (with quotes). Unwrap it.
+                let trimmed = result.trim().trim_matches('"');
+                let dark = trimmed == "dark";
                 let theme = if dark { Theme::Dark } else { Theme::Light };
                 if let Some(win) = handle.get_webview_window("main") {
                     let _ = win.set_theme(Some(theme));
