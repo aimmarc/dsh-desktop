@@ -1,30 +1,60 @@
-// Startup page i18n: zh-CN / en, chosen from the browser locale. The dsh
-// web UI itself follows the system locale through its own locale plugin; this
-// shell page only localizes its own loading/error/retry UI.
-const I18N = {
-  zh: {
-    title: "DeepSeek Harness",
-    starting: "正在启动本地服务…",
-    retry: "重试",
-    hint: "首次启动可能需要一点时间，请稍候",
-  },
-  en: {
-    title: "DeepSeek Harness",
-    starting: "Starting local service…",
-    retry: "Retry",
-    hint: "First launch may take a moment, please wait",
-  },
-};
+// Startup page logic: asks the shell to start the dsh server, then navigates
+// to the harness URL. Shows a retryable error when the server can't start.
+//
+// IPC access uses `window.__TAURI_INTERNALS__.invoke` — the low-level bridge
+// that Tauri 2 ALWAYS injects. The high-level `window.__TAURI__` global
+// (withGlobalTauri) is unreliable: it is undefined while top-level scripts
+// run (tauri-apps/tauri#12990), so we never depend on it.
 
-const lang = (navigator.language || "en").toLowerCase().startsWith("zh") ? "zh" : "en";
-const t = I18N[lang];
+const statusEl = document.getElementById("status");
+const spinnerEl = document.getElementById("spinner");
+const errorEl = document.getElementById("error");
+const retryBtn = document.getElementById("retry");
 
-document.title = t.title;
-document.querySelector("h1").textContent = t.title;
-document.querySelector("#status").textContent = t.starting;
-document.querySelector("#retry").textContent = t.retry;
-document.querySelector(".hint").textContent = t.hint;
+function getInvoke() {
+  try {
+    if (window.__TAURI_INTERNALS__ && typeof window.__TAURI_INTERNALS__.invoke === "function") {
+      return window.__TAURI_INTERNALS__.invoke;
+    }
+  } catch {}
+  try {
+    if (window.__TAURI__ && typeof window.__TAURI__.core?.invoke === "function") {
+      return window.__TAURI__.core.invoke;
+    }
+  } catch {}
+  return null;
+}
 
-// The shell's Rust-side error strings are localized there too; if a future
-// build returns an i18n key we could map it here. For now errors pass
-// through as-is.
+function showError(msg) {
+  statusEl.hidden = true;
+  spinnerEl.hidden = true;
+  errorEl.hidden = false;
+  retryBtn.hidden = false;
+  errorEl.textContent = msg;
+}
+
+async function boot() {
+  statusEl.hidden = false;
+  spinnerEl.hidden = false;
+  errorEl.hidden = true;
+  retryBtn.hidden = true;
+
+  const invoke = getInvoke();
+  if (!invoke) {
+    showError(
+      "无法连接桌面外壳（IPC 不可用）。请重新安装应用。\n" +
+      "IPC bridge unavailable. Please reinstall the app."
+    );
+    return;
+  }
+
+  try {
+    const url = await invoke("server_start");
+    window.location.replace(url);
+  } catch (e) {
+    showError(String(e));
+  }
+}
+
+retryBtn.addEventListener("click", boot);
+boot();

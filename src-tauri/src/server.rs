@@ -129,13 +129,6 @@ fn libc_kill(pid: i32, sig: i32) -> i32 {
     unsafe { libc::kill(pid, sig) }
 }
 
-/// The one running child we own (None when we reused an existing server).
-static CHILD: Mutex<Option<Child>> = Mutex::new(None);
-/// Windows Job Object keeping the child tree alive-scoped to this process
-/// (KILL_ON_JOB_CLOSE). Held for the lifetime of the spawned server.
-#[cfg(windows)]
-static JOB: Mutex<Option<JobObject>> = Mutex::new(None);
-
 fn probe(port: u16) -> bool {
     TcpStream::connect_timeout(
         &format!("127.0.0.1:{port}").parse().unwrap(),
@@ -249,6 +242,13 @@ fn is_zh() -> bool {
 fn i18n(zh: &str, en: &str) -> String {
     if is_zh() { zh.to_string() } else { en.to_string() }
 }
+
+/// The one running child we own (None when we reused an existing server).
+static CHILD: Mutex<Option<Child>> = Mutex::new(None);
+/// Windows Job Object keeping the child tree alive-scoped to this process
+/// (KILL_ON_JOB_CLOSE). Held for the lifetime of the spawned server.
+#[cfg(windows)]
+static JOB: Mutex<Option<JobObject>> = Mutex::new(None);
 
 pub struct ServerManager;
 

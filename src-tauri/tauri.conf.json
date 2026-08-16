@@ -9,15 +9,16 @@
     "frontendDist": "../startup"
   },
   "app": {
-    "withGlobalTauri": true,
     "windows": [
       {
         "label": "main",
         "title": "DeepSeek Harness",
-        "width": 1280,
-        "height": 820,
-        "minWidth": 900,
-        "minHeight": 600,
+        "width": 1150,
+        "height": 740,
+        "minWidth": 800,
+        "minHeight": 560,
+        "maxWidth": 1920,
+        "maxHeight": 1200,
         "center": true,
         "resizable": true,
         "fullscreen": false
