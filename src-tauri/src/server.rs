@@ -292,7 +292,10 @@ impl ServerManager {
         #[cfg(windows)]
         {
             use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x00000200); // CREATE_NEW_PROCESS_GROUP
+            // CREATE_NO_WINDOW (0x08000000): run node without a console
+            // window; CREATE_NEW_PROCESS_GROUP (0x00000200): own process
+            // group so the Job Object + taskkill /T can reap the whole tree.
+            cmd.creation_flags(0x08000000 | 0x00000200);
         }
         #[cfg(not(windows))]
         {

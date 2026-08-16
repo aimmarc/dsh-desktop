@@ -20,22 +20,35 @@ fn server_stop(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
-/// Fit the main window to the current screen's available work area so it
-/// fits on small laptop displays: at most 92% of the work-area width/height,
-/// never exceeding the configured maximum size.
+/// Fit the main window to the current screen so it always fits on small
+/// laptop displays, while never growing past a comfortable default on large
+/// monitors. Strategy: take the smaller of
+///   - the configured default size (1150x740), and
+///   - 92%/90% of the monitor's logical work area.
+/// A 1366x768 laptop (100% DPI) therefore gets ~1058x691; a 4K monitor keeps
+/// the 1150x740 default instead of scaling up with the screen.
 fn fit_window_to_screen(win: &tauri::WebviewWindow) {
-    use tauri::PhysicalSize;
+    use tauri::LogicalSize;
+    const DEFAULT_W: f64 = 1150.0;
+    const DEFAULT_H: f64 = 740.0;
+    const MAX_FRACTION_W: f64 = 0.92;
+    const MAX_FRACTION_H: f64 = 0.90;
+
     let Some(monitor) = win.current_monitor().ok().flatten() else {
         return;
     };
     let size = monitor.size(); // PhysicalSize of the full monitor
     let scale = monitor.scale_factor();
-    // Scale factor of 1.25 on a 1366x768 laptop → logical 1092x614.
+    // Logical (DPI-scaled) monitor size.
     let logical_w = size.width as f64 / scale;
     let logical_h = size.height as f64 / scale;
-    let target_w = (logical_w * 0.92).round() as u32;
-    let target_h = (logical_h * 0.90).round() as u32;
-    let _ = win.set_size(PhysicalSize::new(target_w, target_h));
+
+    // Cap by the screen, then by the default: small screens shrink, large
+    // screens stay at the default instead of ballooning. LogicalSize keeps
+    // the same unit as tauri.conf.json's width/height (logical pixels).
+    let target_w = DEFAULT_W.min(logical_w * MAX_FRACTION_W);
+    let target_h = DEFAULT_H.min(logical_h * MAX_FRACTION_H);
+    let _ = win.set_size(LogicalSize::new(target_w, target_h));
 }
 
 /// Keep the window's native title bar theme in sync with the harness UI.
