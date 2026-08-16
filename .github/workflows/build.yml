@@ -112,13 +112,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # download-artifact restores each platform's bundle dir (nsis/dmg/deb).
-          # --repo is explicit so gh never depends on the checkout's origin.
+          # Collect installer files regardless of how download-artifact laid
+          # out the bundle dirs (nsis/dmg/deb, universal paths, versioned names).
+          mapfile -t FILES < <(find artifacts -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) | sort)
+          echo "installers:"; printf '  %s\n' "${FILES[@]}"
           gh release create "${GITHUB_REF_NAME}" \
             --repo "${{ github.repository }}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb \
+            "${FILES[@]}" \
             || gh release upload "${GITHUB_REF_NAME}" \
               --repo "${{ github.repository }}" \
-              artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb
+              "${FILES[@]}"
