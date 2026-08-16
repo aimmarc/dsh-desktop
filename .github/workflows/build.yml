@@ -79,29 +79,25 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all installers
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
 
-      # The deb package contains the full runtime tree; uploading it with a
-      # recursive glob would fan out thousands of files and exhaust the
-      # uploader's connections. Upload only the top-level installer files.
-      - name: Attach to release
-        run: |
-          ls -la artifacts/
-          echo "=== installer files ==="
-          find artifacts -maxdepth 2 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) -print
-        shell: bash
-
       - name: Create GitHub release with installers
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # download-artifact restores each platform's bundle dir (nsis/dmg/deb).
+          # --repo is explicit so gh never depends on the checkout's origin.
           gh release create "${GITHUB_REF_NAME}" \
+            --repo "${{ github.repository }}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
             artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb \
-            || gh release upload "${GITHUB_REF_NAME}" artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb
+            || gh release upload "${GITHUB_REF_NAME}" \
+              --repo "${{ github.repository }}" \
+              artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb
