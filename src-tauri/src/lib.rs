@@ -51,44 +51,12 @@ fn fit_window_to_screen(win: &tauri::WebviewWindow) {
     let _ = win.set_size(LogicalSize::new(target_w, target_h));
 }
 
-/// Apply the platform's background effect for the given theme.
-/// Apply the platform's background effect for the given theme.
-///
-/// - **Windows**: acrylic via `window-vibrancy::apply_acrylic`. Note: on
-///   Windows 10 + WebView2 the acrylic is visually hidden behind the
-///   webview's composited layer (verified empirically: transparent webview +
-///   translucent body still shows no blur), so this is best-effort — it
-///   takes effect on Windows 11 where the DWMSBT path is used.
-/// - **macOS**: `NSVisualEffectMaterial::UnderWindowBackground` vibrancy via
-///   `window-vibrancy::apply_vibrancy`, active state, rounded corners.
-/// - **Linux**: no window effects; nothing to do.
-fn apply_window_effects(win: &tauri::WebviewWindow, dark: bool) {
-    #[cfg(target_os = "windows")]
-    {
-        // window-vibrancy Color is a (r, g, b, a) tuple.
-        let color = if dark {
-            (28, 30, 36, 190) // dark translucent slate
-        } else {
-            (245, 247, 252, 150) // light translucent white
-        };
-        if let Err(e) = window_vibrancy::apply_acrylic(win, Some(color)) {
-            eprintln!("[effects] apply_acrylic failed: {e}");
-        }
-    }
-    #[cfg(target_os = "macos")]
-    {
-        use window_vibrancy::NSVisualEffectMaterial;
-        let _ = window_vibrancy::apply_vibrancy(win, NSVisualEffectMaterial::UnderWindowBackground, None, Some(8.0));
-    }
-    // Linux: no window effects supported; nothing to do.
-}
-
-/// Keep the window's native title bar theme (and background effect) in sync
-/// with the harness UI. The harness toggles `data-ds-dark-theme` on <body>
-/// when the user picks a dark appearance. We poll it from Rust (the harness
-/// page is a remote origin, so it cannot invoke Tauri commands without risky
-/// IPC grants) and mirror it into the window theme, which drives title bar
-/// colors on Windows/macOS. Polling stops after the window is closed.
+/// Keep the window's native title bar theme in sync with the harness UI.
+/// The harness toggles `data-ds-dark-theme` on <body> when the user picks a
+/// dark appearance. We poll it from Rust (the harness page is a remote
+/// origin, so it cannot invoke Tauri commands without risky IPC grants) and
+/// mirror it into the window theme, which drives title bar colors on
+/// Windows/macOS. Polling stops after the window is closed.
 fn sync_titlebar_theme(app: tauri::AppHandle) {
     use tauri::Theme;
     tauri::async_runtime::spawn(async move {
@@ -120,7 +88,6 @@ fn sync_titlebar_theme(app: tauri::AppHandle) {
                 let theme = if dark { Theme::Dark } else { Theme::Light };
                 if let Some(win) = handle.get_webview_window("main") {
                     let _ = win.set_theme(Some(theme));
-                    apply_window_effects(&win, dark);
                 }
             });
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -144,11 +111,9 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![server_start, server_stop])
         .setup(|app| {
             menu::setup(app.handle())?;
-            // Apply window effects immediately (before the page loads) so the
-            // acrylic/vibrancy shows from the first frame, then fit the
-            // window and keep theme + effects in sync.
+            // Fit the window to the screen before showing, then keep the
+            // title bar theme in sync with the harness UI.
             if let Some(win) = app.get_webview_window("main") {
-                apply_window_effects(&win, false); // initial light
                 fit_window_to_screen(&win);
             }
             sync_titlebar_theme(app.handle().clone());
@@ -172,5 +137,3 @@ pub fn run() {
             }
         });
 }
-
-
