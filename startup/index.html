@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>DeepSeek Harness</title>
+  <style>
+    :root {
+      --bg: #0f1115;
+      --card: #171a21;
+      --text: #e6e8ee;
+      --muted: #8b93a7;
+      --accent: #4f8cff;
+      --error: #ff5c5c;
+      --radius: 12px;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: "Segoe UI", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    .card {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 40px 48px;
+      text-align: center;
+      min-width: 340px;
+      max-width: 460px;
+      box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    }
+    .logo {
+      width: 64px;
+      height: 64px;
+      border-radius: 16px;
+      background: linear-gradient(135deg, #4f8cff, #7a5cff);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+      font-weight: 700;
+      margin: 0 auto 20px;
+      color: #fff;
+    }
+    h1 { font-size: 18px; margin-bottom: 8px; font-weight: 600; }
+    .status { color: var(--muted); font-size: 14px; line-height: 1.6; }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 3px solid rgba(79,140,255,.2);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      margin: 24px auto 0;
+      animation: spin 0.9s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .error { color: var(--error); margin-top: 18px; font-size: 13px; white-space: pre-wrap; }
+    .retry {
+      margin-top: 20px;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      padding: 10px 28px;
+      font-size: 14px;
+      cursor: pointer;
+    }
+    .retry:hover { filter: brightness(1.1); }
+    .hint { margin-top: 16px; font-size: 12px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="logo">DH</div>
+    <h1 data-i18n="title">DeepSeek Harness</h1>
+    <p class="status" id="status" data-i18n="starting">正在启动本地服务…</p>
+    <div class="spinner" id="spinner"></div>
+    <p class="error" id="error" hidden></p>
+    <button class="retry" id="retry" hidden data-i18n="retry">重试</button>
+    <p class="hint" data-i18n="hint">首次启动可能需要一点时间，请稍候</p>
+  </div>
+  <script src="startup.js"></script>
+</body>
+</html>

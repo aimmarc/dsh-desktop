@@ -1,0 +1,24 @@
+{
+  "name": "dsh-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DeepSeek Harness desktop app — Tauri 2 shell + bundled Node runtime + pruned dsh dependencies",
+  "type": "module",
+  "scripts": {
+    "fetch:node": "node scripts/fetch-node.mjs",
+    "pack:runtime": "node scripts/pack.mjs",
+    "pack:runtime:min": "node scripts/pack.mjs --minify",
+    "prepare:runtime": "npm run fetch:node && npm run pack:runtime:min",
+    "tauri": "tauri",
+    "build": "npm run prepare:runtime && tauri build",
+    "bundle": "npm run prepare:runtime && tauri build",
+    "dev": "npm run pack:runtime && tauri dev"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "^0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "esbuild": "^0.24.0"
+  }
+}
