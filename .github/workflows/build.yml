@@ -85,8 +85,22 @@ jobs:
           path: artifacts
           merge-multiple: true
 
+      # The deb package contains the full runtime tree; uploading it with a
+      # recursive glob would fan out thousands of files and exhaust the
+      # uploader's connections. Upload only the top-level installer files.
       - name: Attach to release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: artifacts/**/*
-          generate_release_notes: true
+        run: |
+          ls -la artifacts/
+          echo "=== installer files ==="
+          find artifacts -maxdepth 2 -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.deb" \) -print
+        shell: bash
+
+      - name: Create GitHub release with installers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes \
+            artifacts/*.exe artifacts/*.dmg artifacts/*.deb \
+            || gh release upload "${GITHUB_REF_NAME}" artifacts/*.exe artifacts/*.dmg artifacts/*.deb
