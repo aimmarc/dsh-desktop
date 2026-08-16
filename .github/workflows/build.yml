@@ -99,8 +99,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # download-artifact restores each platform's bundle dir (nsis/dmg/deb).
           gh release create "${GITHUB_REF_NAME}" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes \
-            artifacts/*.exe artifacts/*.dmg artifacts/*.deb \
-            || gh release upload "${GITHUB_REF_NAME}" artifacts/*.exe artifacts/*.dmg artifacts/*.deb
+            artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb \
+            || gh release upload "${GITHUB_REF_NAME}" artifacts/nsis/*.exe artifacts/dmg/*.dmg artifacts/deb/*.deb
