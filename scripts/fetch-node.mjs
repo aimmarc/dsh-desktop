@@ -22,8 +22,10 @@ import { fileURLToPath } from "node:url";
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const outDir = path.join(root, "src-tauri", "resources", "node");
-const version = process.argv[2] ?? "v22.23.2";
+// First positional arg (skipping flags) is the version; --universal is a flag.
 const UNIVERSAL = process.argv.includes("--universal");
+const positional = process.argv.slice(2).filter((a) => !a.startsWith("--"));
+const version = positional[0] ?? "v22.23.2";
 
 const platform = os.platform(); // win32 | darwin | linux
 const arch = os.arch(); // x64 | arm64
