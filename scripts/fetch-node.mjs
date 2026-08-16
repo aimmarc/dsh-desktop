@@ -55,7 +55,12 @@ async function fetchNodeBinary(archName, baseUrl) {
   const tmp = path.join(os.tmpdir(), `dsh-node-${archName}-${Date.now()}`);
   mkdirSync(tmp, { recursive: true });
   if (platform === "win32") {
-    execSync(`tar -xf "${archive}" -C "${tmp}"`, { stdio: "inherit" });
+    // bsdtar (Windows' built-in tar) misparses backslash paths passed with
+    // quotes (`Cannot connect to C:`). Convert to forward slashes, which
+    // both bsdtar and cmd accept.
+    const a = archive.replaceAll("\\", "/");
+    const t = tmp.replaceAll("\\", "/");
+    execSync(`tar -xf "${a}" -C "${t}"`, { stdio: "inherit" });
   } else {
     execSync(`tar -xzf "${archive}" -C "${tmp}"`, { stdio: "inherit" });
   }
