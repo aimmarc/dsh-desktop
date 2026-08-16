@@ -106,9 +106,15 @@ const NATIVE_RULES = [
     },
   },
   {
-    // @img/sharp-<platform>: keep only the target platform package(s).
+    // @img/sharp-<platform> and @img/sharp-libvips-<platform>: keep only the
+    // target platform package(s). Name forms: `sharp-darwin-x64` and
+    // `sharp-libvips-darwin-x64`.
     match: (p) => p.startsWith("@img/sharp-"),
-    keepOnly: (pkgName) => platformKeys.includes(pkgName.slice("@img/sharp-".length)),
+    keepOnly: (pkgName) => {
+      const tail = pkgName.slice("@img/sharp-".length); // e.g. "libvips-darwin-arm64"
+      const plat = tail.startsWith("libvips-") ? tail.slice("libvips-".length) : tail;
+      return platformKeys.includes(plat);
+    },
   },
   {
     // koffi: platform dirs inside the package (win32_x64, darwin_arm64, ...).
@@ -262,14 +268,19 @@ if (UNIVERSAL && process.platform === "darwin") {
       console.log(`[pack] universal: ${name} not declared by sharp, skipping`);
       continue;
     }
-    // Resolve the exact version (allow range like ^0.35.3 → latest matching).
+    // Resolve the exact version. sharp pins these in optionalDependencies
+    // (e.g. "0.35.3"), so prefer the literal key; if it is a range, fall back
+    // to semver-latest matching the range.
     const manifestUrl = `${registry}/${name.replace("/", "%2F")}`;
     const res = await fetch(manifestUrl, { headers: { accept: "application/vnd.npm.install-v1+json" } });
     if (!res.ok) throw new Error(`[pack] universal: cannot fetch manifest for ${name}: HTTP ${res.status}`);
     const manifest = await res.json();
-    const matched = manifest.versions?.[version] ?? Object.keys(manifest.versions ?? {}).filter((v) => v.startsWith(version.replace(/^[\^~]/, ""))).sort().pop();
-    if (!matched) throw new Error(`[pack] universal: no version for ${name}@${version}`);
-    const tarball = manifest.versions[matched].dist.tarball;
+    const versions = manifest.versions ?? {};
+    const exact = versions[version];
+    const matched = exact ? version : Object.keys(versions).filter((v) => v.startsWith(version.replace(/^[\^~]/, ""))).sort().pop();
+    if (!matched || !versions[matched]) throw new Error(`[pack] universal: no version for ${name}@${version}`);
+    const tarball = versions[matched].dist?.tarball;
+    if (!tarball) throw new Error(`[pack] universal: no tarball for ${name}@${matched}`);
     console.log(`[pack] universal: fetching ${name}@${matched}`);
     const tarRes = await fetch(tarball);
     if (!tarRes.ok) throw new Error(`[pack] universal: download failed ${tarball}: HTTP ${tarRes.status}`);
