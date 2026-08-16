@@ -38,14 +38,20 @@ import os from "node:os";
 import { fileURLToPath } from "node:url";
 
 const MINIFY = process.argv.includes("--minify");
+const UNIVERSAL = process.argv.includes("--universal");
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcModules = path.join(root, "node_modules");
 const runtimeDir = path.join(root, "src-tauri", "resources", "runtime");
 const destModules = path.join(runtimeDir, "node_modules");
 
-const platformKey = `${os.platform()}-${os.arch()}`; // e.g. win32-x64
-const platKeyUnderscore = platformKey.replace("-", "_"); // koffi uses win32_x64
+// Platform key(s) to keep. Normal: exactly the current platform. Universal
+// (macOS only): keep BOTH darwin-x64 and darwin-arm64 native binaries so the
+// universal app bundle runs natively on Intel and Apple Silicon.
+const platformKeys = UNIVERSAL && process.platform === "darwin"
+  ? ["darwin-x64", "darwin-arm64"]
+  : [`${os.platform()}-${os.arch()}`];
+const platKeysUnderscore = platformKeys.map((k) => k.replace("-", "_")); // koffi uses darwin_arm64
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -87,29 +93,29 @@ function dropSymbols(dir) {
  */
 const NATIVE_RULES = [
   {
-    // node-pty: keep only current-platform prebuilds; drop PDBs + docs.
+    // node-pty: keep only the target platform(s) prebuilds; drop PDBs + docs.
     match: (p) => p === "node-pty",
     trim: (pkgDir) => {
       const pre = path.join(pkgDir, "prebuilds");
       if (existsSync(pre)) {
         for (const plat of readdirSync(pre)) {
-          if (plat !== platformKey) rmSync(path.join(pre, plat), { recursive: true, force: true });
+          if (!platformKeys.includes(plat)) rmSync(path.join(pre, plat), { recursive: true, force: true });
         }
       }
       dropSymbols(pkgDir);
     },
   },
   {
-    // @img/sharp-<platform>: keep only the current platform package.
+    // @img/sharp-<platform>: keep only the target platform package(s).
     match: (p) => p.startsWith("@img/sharp-"),
-    keepOnly: (pkgName) => pkgName === `@img/sharp-${platformKey}`,
+    keepOnly: (pkgName) => platformKeys.includes(pkgName.slice("@img/sharp-".length)),
   },
   {
     // koffi: platform dirs inside the package (win32_x64, darwin_arm64, ...).
     match: (p) => p === "koffi",
     trim: (pkgDir) => {
       for (const entry of readdirSync(pkgDir, { withFileTypes: true })) {
-        if (entry.isDirectory() && entry.name.includes("_") && entry.name !== platKeyUnderscore) {
+        if (entry.isDirectory() && entry.name.includes("_") && !platKeysUnderscore.includes(entry.name)) {
           rmSync(path.join(pkgDir, entry.name), { recursive: true, force: true });
         }
       }
@@ -117,11 +123,12 @@ const NATIVE_RULES = [
     },
   },
   {
-    // node-addon-require-builtin-<platform>: keep only current platform.
+    // node-addon-require-builtin-<platform>: keep only target platform(s).
+    // The platform package appends "-msvc" on Windows (…-win32-x64-msvc).
     match: (p) => p.startsWith("node-addon-require-builtin-"),
     keepOnly: (pkgName) => {
-      const expected = `node-addon-require-builtin-${platformKey}${process.platform === "win32" ? "-msvc" : ""}`;
-      return pkgName === expected;
+      const expected = platformKeys.map((k) => `node-addon-require-builtin-${k}${process.platform === "win32" ? "-msvc" : ""}`);
+      return expected.includes(pkgName);
     },
   },
   {
@@ -177,7 +184,7 @@ function collectProdClosure(roots) {
 // main
 // ---------------------------------------------------------------------------
 
-console.log(`[pack] platform=${platformKey} minify=${MINIFY}`);
+console.log(`[pack] platform=${platformKeys.join("+")} minify=${MINIFY} universal=${UNIVERSAL}`);
 console.log(`[pack] source node_modules: ${mb(sizeOf(srcModules))} MB`);
 
 const rootManifest = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));

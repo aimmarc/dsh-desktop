@@ -38,6 +38,10 @@ jobs:
           cache: npm
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          # macOS universal build needs both arch targets so tauri can lipo
+          # the shell into a single Intel + Apple Silicon binary.
+          targets: ${{ runner.os == 'macOS' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -47,10 +51,22 @@ jobs:
         run: npm ci
 
       - name: Fetch Node runtime
-        run: node scripts/fetch-node.mjs
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            npm run fetch:node:universal
+          else
+            npm run fetch:node
+          fi
+        shell: bash
 
       - name: Pack dsh runtime
-        run: node scripts/pack.mjs --minify
+        run: |
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            npm run pack:runtime:universal
+          else
+            npm run pack:runtime:min
+          fi
+        shell: bash
 
       - name: Build Tauri app
         run: |
@@ -58,6 +74,8 @@ jobs:
             # Linux: deb is reliable on CI; AppImage needs linuxdeploy which
             # frequently fails on hosted runners (network/toolchain issues).
             npx tauri build --bundles deb
+          elif [ "$RUNNER_OS" = "macOS" ]; then
+            npx tauri build --target universal-apple-darwin
           else
             npx tauri build
           fi
@@ -68,6 +86,9 @@ jobs:
         with:
           name: ${{ matrix.artifact }}
           path: |
+            # Universal (macOS) builds land under target/universal-apple-darwin;
+            # regular builds under target/release.
+            src-tauri/target/universal-apple-darwin/release/bundle/**/*
             src-tauri/target/release/bundle/**/*
           if-no-files-found: error
 

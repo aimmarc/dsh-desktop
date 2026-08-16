@@ -6,12 +6,16 @@
   "type": "module",
   "scripts": {
     "fetch:node": "node scripts/fetch-node.mjs",
+    "fetch:node:universal": "node scripts/fetch-node.mjs --universal",
     "pack:runtime": "node scripts/pack.mjs",
     "pack:runtime:min": "node scripts/pack.mjs --minify",
+    "pack:runtime:universal": "node scripts/pack.mjs --minify --universal",
     "prepare:runtime": "npm run fetch:node && npm run pack:runtime:min",
+    "prepare:runtime:universal": "npm run fetch:node:universal && npm run pack:runtime:universal",
     "tauri": "tauri",
     "build": "npm run prepare:runtime && tauri build",
     "bundle": "npm run prepare:runtime && tauri build",
+    "bundle:universal": "npm run prepare:runtime:universal && tauri build --target universal-apple-darwin",
     "dev": "npm run pack:runtime && tauri dev"
   },
   "dependencies": {
