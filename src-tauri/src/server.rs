@@ -109,9 +109,7 @@ fn kill_tree(child: &mut Child) {
 fn kill_tree(child: &mut Child) {
     // The child was spawned with process_group(0) → it leads its own group
     // whose id equals its pid. Kill the whole group, then reap the child.
-    unsafe {
-        libc_kill(-(child.id() as i32), libc::SIGTERM);
-    }
+    libc_kill(-(child.id() as i32), libc::SIGTERM);
     let _ = child.wait();
 }
 
@@ -302,7 +300,10 @@ impl ServerManager {
             cmd.process_group(0);
         }
 
+        #[cfg(windows)]
         let mut child = cmd.spawn().map_err(|e| format!("{}: {e}", i18n("启动 dsh 服务失败", "failed to start the dsh service")))?;
+        #[cfg(not(windows))]
+        let child = cmd.spawn().map_err(|e| format!("{}: {e}", i18n("启动 dsh 服务失败", "failed to start the dsh service")))?;
 
         // On Windows, assign the child to a kill-on-close Job Object so the
         // whole dsh tree dies with this process even on a hard kill/crash.
