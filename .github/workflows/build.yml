@@ -68,6 +68,32 @@ jobs:
           fi
         shell: bash
 
+      - name: Verify universal macOS runtime
+        if: runner.os == 'macOS'
+        run: |
+          arch -x86_64 /usr/bin/true 2>/dev/null || sudo softwareupdate --install-rosetta --agree-to-license
+          cd src-tauri/resources/runtime
+          for TARGET_ARCH in x86_64 arm64; do
+            echo "verifying runtime for ${TARGET_ARCH}"
+            arch -"${TARGET_ARCH}" ../node/node --input-type=module -e '
+              const { accessSync, constants } = await import("node:fs");
+              const { createRequire } = await import("node:module");
+              const { dirname, join } = await import("node:path");
+              const { pathToFileURL } = await import("node:url");
+              const require = createRequire(pathToFileURL(process.cwd() + "/launch.js"));
+              await import(pathToFileURL(require.resolve("sharp")).href);
+              await import(pathToFileURL(require.resolve("node-pty")).href);
+              await import(pathToFileURL(require.resolve("koffi")).href);
+              const nodePtyRoot = dirname(dirname(require.resolve("node-pty")));
+              accessSync(join(nodePtyRoot, "prebuilds", `darwin-${process.arch}`, "spawn-helper"), constants.X_OK);
+              const ripgrep = await import(pathToFileURL(require.resolve("@vscode/ripgrep")).href);
+              accessSync(ripgrep.rgPath, constants.X_OK);
+              require("node-addon-require-builtin").getBindingInfo();
+              console.log(`runtime imports OK: ${process.platform}-${process.arch}`);
+            '
+          done
+        shell: bash
+
       - name: Build Tauri app
         run: |
           if [ "$RUNNER_OS" = "Linux" ]; then

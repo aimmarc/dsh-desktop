@@ -12,7 +12,7 @@
 
 use std::net::TcpStream;
 use std::path::PathBuf;
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
@@ -24,6 +24,8 @@ const DEFAULT_PORT: u16 = 3080;
 const READY_TIMEOUT: Duration = Duration::from_secs(60);
 /// Probe interval while waiting for readiness.
 const PROBE_INTERVAL: Duration = Duration::from_millis(250);
+/// Maximum server-log tail included in a startup error.
+const LOG_TAIL_BYTES: usize = 16 * 1024;
 
 /// Windows Job Object handle wrapped for RAII; lives as long as the child.
 #[cfg(windows)]
@@ -241,6 +243,41 @@ fn i18n(zh: &str, en: &str) -> String {
     if is_zh() { zh.to_string() } else { en.to_string() }
 }
 
+fn take_child_exit() -> Result<Option<ExitStatus>, String> {
+    let status = {
+        let mut guard = CHILD.lock().unwrap();
+        let Some(child) = guard.as_mut() else {
+            return Ok(None);
+        };
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                guard.take();
+                Some(status)
+            }
+            Ok(None) => None,
+            Err(error) => return Err(format!("{}: {error}", i18n("无法检查 dsh 服务状态", "failed to inspect the dsh service"))),
+        }
+    };
+
+    #[cfg(windows)]
+    if status.is_some() {
+        *JOB.lock().unwrap() = None;
+    }
+
+    Ok(status)
+}
+
+fn log_tail(path: &std::path::Path) -> String {
+    let Ok(data) = std::fs::read(path) else {
+        return i18n("（无法读取服务日志）", "(server log is unavailable)");
+    };
+    if data.is_empty() {
+        return i18n("（服务未输出日志）", "(the service produced no log output)");
+    }
+    let start = data.len().saturating_sub(LOG_TAIL_BYTES);
+    String::from_utf8_lossy(&data[start..]).trim().to_string()
+}
+
 /// The one running child we own (None when we reused an existing server).
 static CHILD: Mutex<Option<Child>> = Mutex::new(None);
 /// Windows Job Object keeping the child tree alive-scoped to this process
@@ -324,11 +361,19 @@ impl ServerManager {
             if probe(port) {
                 return Ok(url_for(port));
             }
+            if let Some(status) = take_child_exit()? {
+                let tail = log_tail(&log_path);
+                return Err(i18n(
+                    &format!("dsh 服务启动后立即退出（{status}）。\n日志：{log_path:?}\n\n{tail}"),
+                    &format!("The dsh service exited during startup ({status}).\nLog: {log_path:?}\n\n{tail}"),
+                ));
+            }
             if Instant::now() >= deadline {
                 Self::stop(app);
+                let tail = log_tail(&log_path);
                 return Err(i18n(
-                    &format!("dsh 服务在 {:.0} 秒内未就绪（端口 {port}）。请检查是否被其他程序占用。", READY_TIMEOUT.as_secs_f64()),
-                    &format!("The dsh service did not become ready within {:.0}s (port {port}). Check whether another program occupies it.", READY_TIMEOUT.as_secs_f64()),
+                    &format!("dsh 服务在 {:.0} 秒内未就绪（端口 {port}）。\n日志：{log_path:?}\n\n{tail}", READY_TIMEOUT.as_secs_f64()),
+                    &format!("The dsh service did not become ready within {:.0}s (port {port}).\nLog: {log_path:?}\n\n{tail}", READY_TIMEOUT.as_secs_f64()),
                 ));
             }
             tokio::time::sleep(PROBE_INTERVAL).await;

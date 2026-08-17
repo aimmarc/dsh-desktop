@@ -24,8 +24,10 @@
  */
 
 import {
+  chmodSync,
   cpSync,
   existsSync,
+  mkdtempSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -33,6 +35,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
@@ -75,6 +79,27 @@ function sizeOf(dir) {
     } catch {}
   }
   return total;
+}
+
+function lockPackageName(key) {
+  const match = key.match(/^node_modules\/(?:@[^/]+\/[^/]+|[^/]+)$/);
+  return match ? key.slice("node_modules/".length) : undefined;
+}
+
+function permitsPlatform(values, target) {
+  if (!Array.isArray(values) || values.length === 0) return true;
+  if (values.includes(`!${target}`)) return false;
+  const positive = values.filter((value) => !value.startsWith("!"));
+  return positive.length === 0 || positive.includes(target);
+}
+
+function verifyIntegrity(data, integrity, packageName) {
+  const [algorithm, expected] = integrity.split("-", 2);
+  if (!algorithm || !expected || !["sha256", "sha384", "sha512"].includes(algorithm)) {
+    throw new Error(`[pack] universal: unsupported integrity for ${packageName}`);
+  }
+  const actual = createHash(algorithm).update(data).digest("base64");
+  if (actual !== expected) throw new Error(`[pack] universal: integrity check failed for ${packageName}`);
 }
 
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1);
@@ -251,52 +276,54 @@ for (const entry of entries) {
 }
 console.log(`[pack] copied ${copied} packages, skipped ${skipped}`);
 
-// 1b. Universal (macOS) fix-up: npm only installs platform packages matching
-//     the build machine (CI runs arm64), so the x64 sharp platform packages
-//     never land in node_modules. Download and inject the missing platform
-//     packages straight from the npm registry (bypassing npm's os/cpu gate).
+// 1b. npm installs optional packages only for the build machine's CPU. A
+// universal runtime needs every production package selected for either macOS
+// architecture, so inject all missing darwin packages from the lockfile.
 if (UNIVERSAL && process.platform === "darwin") {
-  const { execSync } = await import("node:child_process");
-  const registry = process.env.npm_config_registry ?? "https://registry.npmjs.org";
-  const sharpPkg = JSON.parse(readFileSync(path.join(srcModules, "sharp", "package.json"), "utf8"));
-  const optional = sharpPkg.optionalDependencies ?? {};
-  const wanted = ["@img/sharp-darwin-x64", "@img/sharp-libvips-darwin-x64"];
-  for (const name of wanted) {
-    if (existsSync(path.join(destModules, name))) continue; // already present
-    const version = optional[name];
-    if (!version) {
-      console.log(`[pack] universal: ${name} not declared by sharp, skipping`);
-      continue;
+  const lock = JSON.parse(readFileSync(path.join(root, "package-lock.json"), "utf8"));
+  const targets = platformKeys.map((key) => key.slice("darwin-".length));
+  const missing = Object.entries(lock.packages ?? {})
+    .map(([key, metadata]) => ({ name: lockPackageName(key), metadata }))
+    .filter(({ name, metadata }) =>
+      name &&
+      prodSet.has(name) &&
+      !existsSync(path.join(destModules, name)) &&
+      permitsPlatform(metadata.os, "darwin") &&
+      targets.some((arch) => permitsPlatform(metadata.cpu, arch)) &&
+      (Array.isArray(metadata.os) || Array.isArray(metadata.cpu))
+    );
+
+  const tmpRoot = mkdtempSync(path.join(os.tmpdir(), "dsh-universal-"));
+  try {
+    for (const [index, { name, metadata }] of missing.entries()) {
+      if (!metadata.resolved || !metadata.integrity) {
+        throw new Error(`[pack] universal: lockfile lacks resolved/integrity for ${name}`);
+      }
+      console.log(`[pack] universal: fetching ${name}@${metadata.version}`);
+      const response = await fetch(metadata.resolved);
+      if (!response.ok) throw new Error(`[pack] universal: download failed ${metadata.resolved}: HTTP ${response.status}`);
+      const data = Buffer.from(await response.arrayBuffer());
+      verifyIntegrity(data, metadata.integrity, name);
+
+      const archive = path.join(tmpRoot, `${index}.tgz`);
+      const extracted = path.join(tmpRoot, `${index}`);
+      writeFileSync(archive, data);
+      mkdirSync(extracted);
+      execFileSync("tar", ["-xzf", archive, "-C", extracted], { stdio: "inherit" });
+
+      const pkgDest = path.join(destModules, name);
+      mkdirSync(path.dirname(pkgDest), { recursive: true });
+      cpSync(path.join(extracted, "package"), pkgDest, { recursive: true, force: true });
+      console.log(`[pack] universal: injected ${name}`);
     }
-    // Resolve the exact version. sharp pins these in optionalDependencies
-    // (e.g. "0.35.3"), so prefer the literal key; if it is a range, fall back
-    // to semver-latest matching the range.
-    const manifestUrl = `${registry}/${name.replace("/", "%2F")}`;
-    const res = await fetch(manifestUrl, { headers: { accept: "application/vnd.npm.install-v1+json" } });
-    if (!res.ok) throw new Error(`[pack] universal: cannot fetch manifest for ${name}: HTTP ${res.status}`);
-    const manifest = await res.json();
-    const versions = manifest.versions ?? {};
-    const exact = versions[version];
-    const matched = exact ? version : Object.keys(versions).filter((v) => v.startsWith(version.replace(/^[\^~]/, ""))).sort().pop();
-    if (!matched || !versions[matched]) throw new Error(`[pack] universal: no version for ${name}@${version}`);
-    const tarball = versions[matched].dist?.tarball;
-    if (!tarball) throw new Error(`[pack] universal: no tarball for ${name}@${matched}`);
-    console.log(`[pack] universal: fetching ${name}@${matched}`);
-    const tarRes = await fetch(tarball);
-    if (!tarRes.ok) throw new Error(`[pack] universal: download failed ${tarball}: HTTP ${tarRes.status}`);
-    const buf = Buffer.from(await tarRes.arrayBuffer());
-    const tmpTar = path.join(os.tmpdir(), `${name.replace("/", "-")}.tgz`);
-    writeFileSync(tmpTar, buf);
-    const tmpDir = path.join(os.tmpdir(), `univ-${Date.now()}`);
-    mkdirSync(tmpDir, { recursive: true });
-    execSync(`tar -xzf "${tmpTar}" -C "${tmpDir}"`, { stdio: "inherit" });
-    const pkgSrc = path.join(tmpDir, "package");
-    const pkgDest = path.join(destModules, name);
-    mkdirSync(path.dirname(pkgDest), { recursive: true });
-    cpSync(pkgSrc, pkgDest, { recursive: true, force: true });
-    rmSync(tmpDir, { recursive: true, force: true });
-    rmSync(tmpTar, { force: true });
-    console.log(`[pack] universal: injected ${name}`);
+  } finally {
+    rmSync(tmpRoot, { recursive: true, force: true });
+  }
+
+  // npm's postinstall only chmods the build CPU's node-pty helper.
+  for (const key of platformKeys) {
+    const helper = path.join(destModules, "node-pty", "prebuilds", key, "spawn-helper");
+    if (existsSync(helper)) chmodSync(helper, 0o755);
   }
 }
 
