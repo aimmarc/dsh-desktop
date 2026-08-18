@@ -48,7 +48,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcModules = path.join(root, "node_modules");
 const runtimeDir = path.join(root, "src-tauri", "resources", "runtime");
 const destModules = path.join(runtimeDir, "node_modules");
-const abortSignalCompatPath = path.join(root, "scripts", "legacy-webkit-abort-signal.js");
+const legacyWebKitCompatPath = path.join(root, "scripts", "legacy-webkit-compat.js");
 
 // Platform key(s) to keep. Normal: exactly the current platform. Universal
 // (macOS only): keep BOTH darwin-x64 and darwin-arm64 native binaries so the
@@ -103,7 +103,21 @@ function verifyIntegrity(data, integrity, packageName) {
   if (actual !== expected) throw new Error(`[pack] universal: integrity check failed for ${packageName}`);
 }
 
-function injectLegacyWebKitCompat() {
+async function buildLegacyWebKitCompat() {
+  const { build } = await import("esbuild");
+  const result = await build({
+    entryPoints: [legacyWebKitCompatPath],
+    bundle: true,
+    format: "iife",
+    legalComments: "none",
+    minify: true,
+    target: "safari15",
+    write: false,
+  });
+  return result.outputFiles[0].text.trim();
+}
+
+async function injectLegacyWebKitCompat() {
   const indexPath = path.join(destModules, "@deepseek-ai", "dsh-web-frontend", "dist", "index.html");
   if (!existsSync(indexPath)) throw new Error(`[pack] web frontend index not found: ${indexPath}`);
 
@@ -111,14 +125,14 @@ function injectLegacyWebKitCompat() {
   const html = readFileSync(indexPath, "utf8");
   if (html.includes(marker)) return;
 
-  const polyfill = readFileSync(abortSignalCompatPath, "utf8").trim();
+  const polyfill = await buildLegacyWebKitCompat();
   const head = /<head(?:\s[^>]*)?>/i.exec(html);
   if (head === null) throw new Error("[pack] web frontend index has no <head> tag");
   const insertionPoint = head.index + head[0].length;
 
   const script = `\n    <script ${marker}>\n${polyfill}\n    </script>`;
   writeFileSync(indexPath, `${html.slice(0, insertionPoint)}${script}${html.slice(insertionPoint)}`);
-  console.log("[pack] injected legacy WebKit AbortSignal compatibility");
+  console.log("[pack] injected legacy WebKit compatibility bundle");
 }
 
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1);
@@ -346,10 +360,10 @@ if (UNIVERSAL && process.platform === "darwin") {
   }
 }
 
-// macOS 12's WebKit predates AbortSignal.timeout/any. The Harness frontend
-// uses both for every RPC, so install the compatibility layer before its
-// module entry executes. This is injected into the packaged copy only.
-injectLegacyWebKitCompat();
+// Early macOS 12 WebKit predates several APIs used by every Harness RPC and
+// event projection. Install the compatibility layer before the module entry
+// executes. This is injected into the packaged copy only.
+await injectLegacyWebKitCompat();
 
 // 2. always-drop cleanup pass over the copied tree.
 let droppedBytes = 0;
@@ -379,24 +393,38 @@ pruneEmpty(destModules);
 //    minified) are left untouched because esbuild's CJS compression can
 //    break Node's cjs-module-lexer static detection of named exports
 //    (e.g. @opentelemetry/* `Object.defineProperty(exports, ...)` getters).
+//    Browser assets are lowered for the oldest declared macOS WebKit instead
+//    of inheriting the Node target used by the bundled server runtime.
 if (MINIFY) {
   const { transform } = await import("esbuild");
   let minified = 0;
+  let browserLowered = 0;
   for (const f of walk(destModules)) {
     if (!f.endsWith(".js")) continue;
-    if (!f.replaceAll("\\", "/").includes("/@deepseek-ai/")) continue;
+    const normalized = f.replaceAll("\\", "/");
+    if (!normalized.includes("/@deepseek-ai/")) continue;
+    const isBrowserAsset = normalized.includes("/@deepseek-ai/dsh-web-frontend/dist/");
     const src = readFileSync(f, "utf8");
     try {
-      const { code } = await transform(src, { loader: "js", target: "node22", minify: true });
-      if (code.length < src.length) {
+      const { code } = await transform(src, {
+        loader: "js",
+        target: isBrowserAsset ? "safari15" : "node22",
+        minify: true,
+      });
+      if (isBrowserAsset ? code !== src : code.length < src.length) {
         writeFileSync(f, code);
         minified++;
+        if (isBrowserAsset) browserLowered++;
       }
-    } catch {
-      // leave non-minifiable files untouched
+    } catch (error) {
+      if (isBrowserAsset) {
+        throw new Error(`[pack] failed to lower Harness browser asset ${f}`, { cause: error });
+      }
+      // Leave non-browser files untouched when optional minification fails.
     }
   }
   console.log(`[pack] minified ${minified} @deepseek-ai js files`);
+  console.log(`[pack] lowered ${browserLowered} Harness browser assets for Safari 15`);
 }
 
 // 5. Report.

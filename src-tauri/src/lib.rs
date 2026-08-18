@@ -1,6 +1,7 @@
 mod menu;
 mod server;
 
+use std::io::Write;
 use tauri::Manager;
 
 /// Start the dsh server and return the canonical URL it is reachable at.
@@ -51,13 +52,47 @@ fn fit_window_to_screen(win: &tauri::WebviewWindow) {
     let _ = win.set_size(LogicalSize::new(target_w, target_h));
 }
 
-/// Keep the window's native title bar theme in sync with the harness UI.
+fn append_webview_errors(result: &str) {
+    let Ok(entries) = serde_json::from_str::<String>(result) else {
+        return;
+    };
+    if entries.is_empty() {
+        return;
+    }
+
+    let home = std::env::var_os("USERPROFILE")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from("."));
+    let path = home.join(".dsh").join("dsh-desktop-webview.log");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    const MAX_LOG_BYTES: u64 = 1024 * 1024;
+    let truncate = std::fs::metadata(&path)
+        .map(|metadata| metadata.len() >= MAX_LOG_BYTES)
+        .unwrap_or(false);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .append(!truncate)
+        .truncate(truncate)
+        .open(path);
+    if let Ok(mut file) = file {
+        let _ = writeln!(file, "{entries}");
+    }
+}
+
+/// Keep native window state in sync and drain errors captured by the injected
+/// legacy-WebKit bootstrap. The remote Harness page never receives Tauri IPC
+/// permissions; Rust polls both values through the existing eval callback.
 /// The harness toggles `data-ds-dark-theme` on <body> when the user picks a
 /// dark appearance. We poll it from Rust (the harness page is a remote
 /// origin, so it cannot invoke Tauri commands without risky IPC grants) and
 /// mirror it into the window theme, which drives title bar colors on
 /// Windows/macOS. Polling stops after the window is closed.
-fn sync_titlebar_theme(app: tauri::AppHandle) {
+fn sync_webview_state(app: tauri::AppHandle) {
     use tauri::Theme;
     tauri::async_runtime::spawn(async move {
         loop {
@@ -90,6 +125,18 @@ fn sync_titlebar_theme(app: tauri::AppHandle) {
                     let _ = win.set_theme(Some(theme));
                 }
             });
+            let drain_errors = r#"
+                (() => {
+                  try {
+                    const queue = globalThis.__DSH_DESKTOP_ERRORS__;
+                    if (!Array.isArray(queue) || queue.length === 0) return '';
+                    return queue.splice(0).map((entry) => JSON.stringify(entry)).join('\n');
+                  } catch { return ''; }
+                })()
+            "#;
+            let _ = win.eval_with_callback(drain_errors, |result| {
+                append_webview_errors(&result);
+            });
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
@@ -116,7 +163,7 @@ pub fn run() {
             if let Some(win) = app.get_webview_window("main") {
                 fit_window_to_screen(&win);
             }
-            sync_titlebar_theme(app.handle().clone());
+            sync_webview_state(app.handle().clone());
             Ok(())
         })
         .on_window_event(|window, event| {

@@ -71,7 +71,7 @@ jobs:
       - name: Verify legacy macOS WebKit compatibility
         if: runner.os == 'macOS'
         run: |
-          node --test scripts/legacy-webkit-abort-signal.test.mjs
+          npm run test:compat
           node --input-type=module <<'NODE'
           import { readFileSync } from "node:fs";
 
@@ -84,6 +84,9 @@ jobs:
           }
           if ((html.match(new RegExp(marker, "g")) ?? []).length !== 1) {
             throw new Error("legacy WebKit compatibility must be injected exactly once");
+          }
+          for (const feature of ["structuredClone", "randomUUID", "findLast", "Object.hasOwn", "AbortSignal.timeout"]) {
+            if (!html.includes(feature)) throw new Error(`compatibility bundle is missing ${feature}`);
           }
           NODE
 

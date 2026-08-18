@@ -831,7 +831,7 @@ dependencies = [
 
 [[package]]
 name = "dsh-desktop"
-version = "0.2.10"
+version = "0.2.11"
 dependencies = [
  "log",
  "serde",
