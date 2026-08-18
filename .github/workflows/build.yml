@@ -68,6 +68,25 @@ jobs:
           fi
         shell: bash
 
+      - name: Verify legacy macOS WebKit compatibility
+        if: runner.os == 'macOS'
+        run: |
+          node --test scripts/legacy-webkit-abort-signal.test.mjs
+          node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const html = readFileSync("src-tauri/resources/runtime/node_modules/@deepseek-ai/dsh-web-frontend/dist/index.html", "utf8");
+          const marker = "data-dsh-desktop-legacy-webkit";
+          const markerIndex = html.indexOf(marker);
+          const moduleIndex = html.indexOf('<script type="module"');
+          if (markerIndex === -1 || moduleIndex === -1 || markerIndex > moduleIndex) {
+            throw new Error("legacy WebKit compatibility must load before the Harness module entry");
+          }
+          if ((html.match(new RegExp(marker, "g")) ?? []).length !== 1) {
+            throw new Error("legacy WebKit compatibility must be injected exactly once");
+          }
+          NODE
+
       - name: Verify universal macOS runtime
         if: runner.os == 'macOS'
         run: |

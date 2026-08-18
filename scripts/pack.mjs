@@ -48,6 +48,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcModules = path.join(root, "node_modules");
 const runtimeDir = path.join(root, "src-tauri", "resources", "runtime");
 const destModules = path.join(runtimeDir, "node_modules");
+const abortSignalCompatPath = path.join(root, "scripts", "legacy-webkit-abort-signal.js");
 
 // Platform key(s) to keep. Normal: exactly the current platform. Universal
 // (macOS only): keep BOTH darwin-x64 and darwin-arm64 native binaries so the
@@ -100,6 +101,24 @@ function verifyIntegrity(data, integrity, packageName) {
   }
   const actual = createHash(algorithm).update(data).digest("base64");
   if (actual !== expected) throw new Error(`[pack] universal: integrity check failed for ${packageName}`);
+}
+
+function injectLegacyWebKitCompat() {
+  const indexPath = path.join(destModules, "@deepseek-ai", "dsh-web-frontend", "dist", "index.html");
+  if (!existsSync(indexPath)) throw new Error(`[pack] web frontend index not found: ${indexPath}`);
+
+  const marker = "data-dsh-desktop-legacy-webkit";
+  const html = readFileSync(indexPath, "utf8");
+  if (html.includes(marker)) return;
+
+  const polyfill = readFileSync(abortSignalCompatPath, "utf8").trim();
+  const head = /<head(?:\s[^>]*)?>/i.exec(html);
+  if (head === null) throw new Error("[pack] web frontend index has no <head> tag");
+  const insertionPoint = head.index + head[0].length;
+
+  const script = `\n    <script ${marker}>\n${polyfill}\n    </script>`;
+  writeFileSync(indexPath, `${html.slice(0, insertionPoint)}${script}${html.slice(insertionPoint)}`);
+  console.log("[pack] injected legacy WebKit AbortSignal compatibility");
 }
 
 const mb = (bytes) => (bytes / 1024 / 1024).toFixed(1);
@@ -326,6 +345,11 @@ if (UNIVERSAL && process.platform === "darwin") {
     if (existsSync(helper)) chmodSync(helper, 0o755);
   }
 }
+
+// macOS 12's WebKit predates AbortSignal.timeout/any. The Harness frontend
+// uses both for every RPC, so install the compatibility layer before its
+// module entry executes. This is injected into the packaged copy only.
+injectLegacyWebKitCompat();
 
 // 2. always-drop cleanup pass over the copied tree.
 let droppedBytes = 0;
